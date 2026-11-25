@@ -1,0 +1,8 @@
+{
+  "name": "RemissionCare",
+  "description": "ระบบติดตาม DM Remission และค่า HbA1c ในเลือดแบบเรียลไทม์ พร้อมแจ้งเตือนนัดหมายแพทย์ วิเคราะห์แนวโน้มผลตรวจ เชื่อมต่ออุปกรณ์สุขภาพ และจัดการข้อมูลตามมาตรฐานคลินิก",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

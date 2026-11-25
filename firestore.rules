@@ -1,0 +1,413 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Primitives
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(patientId) {
+      return isSignedIn() && request.auth.uid == patientId;
+    }
+
+    function isValidIcd10(code) {
+      return code is string && code in ['E10', 'E11', 'E12', 'E13', 'E14'];
+    }
+
+    function isValidDateStr(d) {
+      return d is string && d.size() == 10 && d.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
+    function hasValidParentPatient(patientId) {
+      return existsAfter(/databases/$(database)/documents/patients/$(patientId))
+        && getAfter(/databases/$(database)/documents/patients/$(patientId)).data.ownerId == request.auth.uid;
+    }
+
+    // Validation Blueprint: PatientProfile
+    function isValidPatientProfile(data) {
+      return data.keys().hasAll([
+          'ownerId', 'displayName', 'icd10Code', 'typeArea', 'remissionStage',
+          'activityCode120', 'targetHba1c', 'medsFreeMonths', 'clinicName',
+          'attendingDoctor', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'displayName', 'icd10Code', 'typeArea', 'remissionStage',
+          'activityCode120', 'targetHba1c', 'medsFreeMonths', 'clinicName',
+          'attendingDoctor', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && isValidIcd10(data.icd10Code)
+        && data.typeArea is number && data.typeArea >= 1 && data.typeArea <= 5
+        && data.remissionStage is string && data.remissionStage in ['active_dm', 'improving', 'in_remission', 'sustained_remission']
+        && data.activityCode120 is bool
+        && data.targetHba1c is number && data.targetHba1c >= 4.0 && data.targetHba1c <= 10.0
+        && data.medsFreeMonths is number && data.medsFreeMonths >= 0 && data.medsFreeMonths <= 600
+        && data.clinicName is string && data.clinicName.size() <= 160
+        && data.attendingDoctor is string && data.attendingDoctor.size() <= 120
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: PatientPrivatePii
+    function isValidPrivatePii(data) {
+      return data.keys().hasAll([
+          'ownerId', 'cidMasked', 'fullName', 'birthDate', 'phone',
+          'email', 'insuranceScheme', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'cidMasked', 'fullName', 'birthDate', 'phone',
+          'email', 'insuranceScheme', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.cidMasked is string && data.cidMasked.size() >= 4 && data.cidMasked.size() <= 20
+        && data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 160
+        && isValidDateStr(data.birthDate)
+        && data.phone is string && data.phone.size() <= 32
+        && data.email is string && data.email.size() <= 160
+        && data.insuranceScheme is string && data.insuranceScheme in ['UCS', 'SSS', 'CSMBS', 'SelfPay', 'Other']
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: Hba1cRecord
+    function isValidHba1cRecord(data) {
+      return data.keys().hasAll([
+          'ownerId', 'value', 'testDate', 'loincCode', 'icd10Code',
+          'facilityName', 'activityCode', 'eClaimStatus', 'notes',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'value', 'testDate', 'loincCode', 'icd10Code',
+          'facilityName', 'activityCode', 'eClaimStatus', 'notes',
+          'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.value is number && data.value >= 3.0 && data.value <= 20.0
+        && isValidDateStr(data.testDate)
+        && data.loincCode is string && data.loincCode.size() >= 1 && data.loincCode.size() <= 20
+        && isValidIcd10(data.icd10Code)
+        && data.facilityName is string && data.facilityName.size() >= 1 && data.facilityName.size() <= 160
+        && data.activityCode is string && data.activityCode in ['120', 'standard']
+        && data.eClaimStatus is string && data.eClaimStatus in ['synced', 'pending', 'rep_error', 'late_submission']
+        && data.notes is string && data.notes.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: DeviceReading
+    function isValidDeviceReading(data) {
+      return data.keys().hasAll([
+          'ownerId', 'deviceType', 'deviceName', 'glucoseMgDl', 'systolic',
+          'diastolic', 'weightKg', 'mealContext', 'recordedAt', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'deviceType', 'deviceName', 'glucoseMgDl', 'systolic',
+          'diastolic', 'weightKg', 'mealContext', 'recordedAt', 'createdAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.deviceType is string && data.deviceType in ['glucometer', 'cgm', 'bp_monitor', 'smart_scale']
+        && data.deviceName is string && data.deviceName.size() >= 1 && data.deviceName.size() <= 120
+        && data.glucoseMgDl is number && data.glucoseMgDl >= 0 && data.glucoseMgDl <= 800
+        && data.systolic is number && data.systolic >= 0 && data.systolic <= 300
+        && data.diastolic is number && data.diastolic >= 0 && data.diastolic <= 200
+        && data.weightKg is number && data.weightKg >= 0 && data.weightKg <= 400
+        && data.mealContext is string && data.mealContext in ['fasting', 'pre_meal', 'post_meal', 'bedtime']
+        && data.recordedAt is string && data.recordedAt.size() >= 10 && data.recordedAt.size() <= 40
+        && data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: Appointment
+    function isValidAppointment(data) {
+      return data.keys().hasAll([
+          'ownerId', 'doctorName', 'department', 'facility', 'appointmentDate',
+          'purpose', 'reminderEnabled', 'reminderDaysBefore', 'status', 'notes',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'doctorName', 'department', 'facility', 'appointmentDate',
+          'purpose', 'reminderEnabled', 'reminderDaysBefore', 'status', 'notes',
+          'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.doctorName is string && data.doctorName.size() >= 1 && data.doctorName.size() <= 120
+        && data.department is string && data.department.size() >= 1 && data.department.size() <= 120
+        && data.facility is string && data.facility.size() >= 1 && data.facility.size() <= 160
+        && data.appointmentDate is string && data.appointmentDate.size() >= 10 && data.appointmentDate.size() <= 40
+        && data.purpose is string && data.purpose in ['hba1c_followup', 'remission_eval', 'nutrition_consult', 'telemed']
+        && data.reminderEnabled is bool
+        && data.reminderDaysBefore is number && data.reminderDaysBefore >= 0 && data.reminderDaysBefore <= 30
+        && data.status is string && data.status in ['scheduled', 'completed', 'cancelled']
+        && data.notes is string && data.notes.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: DoctorRecommendation
+    function isValidRecommendation(data) {
+      return data.keys().hasAll([
+          'ownerId', 'doctorName', 'category', 'title', 'advice',
+          'priority', 'acknowledged', 'issuedDate', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'doctorName', 'category', 'title', 'advice',
+          'priority', 'acknowledged', 'issuedDate', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.doctorName is string && data.doctorName.size() >= 1 && data.doctorName.size() <= 120
+        && data.category is string && data.category in ['nutrition', 'exercise', 'medication', 'lab_schedule', 'remission_plan']
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.advice is string && data.advice.size() >= 1 && data.advice.size() <= 1000
+        && data.priority is string && data.priority in ['routine', 'attention', 'urgent']
+        && data.acknowledged is bool
+      && isValidDateStr(data.issuedDate)
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: ProgramParticipant
+    function isValidProgramParticipant(data) {
+      return data.keys().hasAll([
+          'ownerId', 'participantCode', 'displayName', 'icd10Code', 'typeArea',
+          'activityCode', 'enrolledDate', 'baselineHba1c', 'currentHba1c',
+          'targetHba1c', 'medsFreeMonths', 'remissionStage', 'lastCheckupDate',
+          'nextFollowupDate', 'clinicName', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'participantCode', 'displayName', 'icd10Code', 'typeArea',
+          'activityCode', 'enrolledDate', 'baselineHba1c', 'currentHba1c',
+          'targetHba1c', 'medsFreeMonths', 'remissionStage', 'lastCheckupDate',
+          'nextFollowupDate', 'clinicName', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.participantCode is string && data.participantCode.size() >= 1 && data.participantCode.size() <= 32
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && isValidIcd10(data.icd10Code)
+        && data.typeArea is number && data.typeArea >= 1 && data.typeArea <= 5
+        && data.activityCode is string && data.activityCode in ['120', 'standard']
+        && isValidDateStr(data.enrolledDate)
+        && data.baselineHba1c is number && data.baselineHba1c >= 3.0 && data.baselineHba1c <= 20.0
+        && data.currentHba1c is number && data.currentHba1c >= 3.0 && data.currentHba1c <= 20.0
+        && data.targetHba1c is number && data.targetHba1c >= 4.0 && data.targetHba1c <= 10.0
+        && data.medsFreeMonths is number && data.medsFreeMonths >= 0 && data.medsFreeMonths <= 600
+        && data.remissionStage is string && data.remissionStage in ['active_dm', 'improving', 'in_remission', 'sustained_remission']
+        && isValidDateStr(data.lastCheckupDate)
+        && isValidDateStr(data.nextFollowupDate)
+        && data.clinicName is string && data.clinicName.size() <= 160
+        && data.notes is string && data.notes.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Collection: /patients/{patientId}
+    match /patients/{patientId} {
+      allow get: if isValidId(patientId) && isOwner(patientId) && (resource == null || existing().ownerId == request.auth.uid);
+      allow list: if false;
+      allow create: if isValidId(patientId)
+        && isOwner(patientId)
+        && isValidPatientProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(patientId)
+        && isOwner(patientId)
+        && isValidPatientProfile(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'icd10Code', 'typeArea', 'remissionStage',
+          'activityCode120', 'targetHba1c', 'medsFreeMonths',
+          'clinicName', 'attendingDoctor', 'updatedAt'
+        ]);
+      allow delete: if false;
+
+      // Isolated PII Subcollection: /patients/{patientId}/private/{docId}
+      match /private/{docId} {
+        allow get: if isValidId(patientId) && docId == 'pii' && isOwner(patientId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if false;
+        allow create: if isValidId(patientId)
+          && docId == 'pii'
+          && isOwner(patientId)
+          && isValidPrivatePii(incoming())
+          && incoming().updatedAt == request.time
+          && hasValidParentPatient(patientId);
+        allow update: if isValidId(patientId)
+          && docId == 'pii'
+          && isOwner(patientId)
+          && isValidPrivatePii(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().updatedAt == request.time
+          && hasValidParentPatient(patientId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'cidMasked', 'fullName', 'birthDate', 'phone', 'email', 'insuranceScheme', 'updatedAt'
+          ]);
+        allow delete: if false;
+      }
+
+      // Subcollection: /patients/{patientId}/hba1cRecords/{recordId}
+      match /hba1cRecords/{recordId} {
+        allow get: if isValidId(patientId) && isValidId(recordId) && isOwner(patientId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(patientId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(patientId)
+          && isValidId(recordId)
+          && isOwner(patientId)
+          && isValidHba1cRecord(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasValidParentPatient(patientId);
+        allow update: if isValidId(patientId)
+          && isValidId(recordId)
+          && isOwner(patientId)
+          && isValidHba1cRecord(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && hasValidParentPatient(patientId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'value', 'testDate', 'loincCode', 'icd10Code', 'facilityName',
+            'activityCode', 'eClaimStatus', 'notes', 'updatedAt'
+          ]);
+        allow delete: if isValidId(patientId)
+          && isValidId(recordId)
+          && isOwner(patientId)
+          && existing().ownerId == request.auth.uid
+          && hasValidParentPatient(patientId);
+      }
+
+      // Subcollection: /patients/{patientId}/deviceReadings/{readingId}
+      match /deviceReadings/{readingId} {
+        allow get: if isValidId(patientId) && isValidId(readingId) && isOwner(patientId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(patientId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(patientId)
+          && isValidId(readingId)
+          && isOwner(patientId)
+          && isValidDeviceReading(incoming())
+          && incoming().createdAt == request.time
+          && hasValidParentPatient(patientId);
+        allow update: if false;
+        allow delete: if isValidId(patientId)
+          && isValidId(readingId)
+          && isOwner(patientId)
+          && existing().ownerId == request.auth.uid
+          && hasValidParentPatient(patientId);
+      }
+
+      // Subcollection: /patients/{patientId}/appointments/{appointmentId}
+      match /appointments/{appointmentId} {
+        allow get: if isValidId(patientId) && isValidId(appointmentId) && isOwner(patientId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(patientId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(patientId)
+          && isValidId(appointmentId)
+          && isOwner(patientId)
+          && isValidAppointment(incoming())
+          && incoming().status == 'scheduled'
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasValidParentPatient(patientId);
+        allow update: if isValidId(patientId)
+          && isValidId(appointmentId)
+          && isOwner(patientId)
+          && isValidAppointment(incoming())
+          && existing().status == 'scheduled'
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && hasValidParentPatient(patientId)
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['reminderEnabled', 'reminderDaysBefore', 'updatedAt'])
+            || incoming().diff(existing()).affectedKeys().hasOnly([
+              'doctorName', 'department', 'facility', 'appointmentDate',
+              'purpose', 'reminderEnabled', 'reminderDaysBefore', 'notes', 'updatedAt'
+            ])
+            || incoming().diff(existing()).affectedKeys().hasOnly(['status', 'notes', 'updatedAt'])
+          );
+        allow delete: if isValidId(patientId)
+          && isValidId(appointmentId)
+          && isOwner(patientId)
+          && existing().ownerId == request.auth.uid
+          && hasValidParentPatient(patientId);
+      }
+
+      // Subcollection: /patients/{patientId}/recommendations/{recId}
+      match /recommendations/{recId} {
+        allow get: if isValidId(patientId) && isValidId(recId) && isOwner(patientId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(patientId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(patientId)
+          && isValidId(recId)
+          && isOwner(patientId)
+          && isValidRecommendation(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasValidParentPatient(patientId);
+        allow update: if isValidId(patientId)
+          && isValidId(recId)
+          && isOwner(patientId)
+          && isValidRecommendation(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && hasValidParentPatient(patientId)
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['acknowledged', 'updatedAt'])
+            || incoming().diff(existing()).affectedKeys().hasOnly([
+              'doctorName', 'category', 'title', 'advice', 'priority', 'issuedDate', 'updatedAt'
+            ])
+          );
+        allow delete: if isValidId(patientId)
+          && isValidId(recId)
+          && isOwner(patientId)
+          && existing().ownerId == request.auth.uid
+          && hasValidParentPatient(patientId);
+      }
+
+      // Subcollection: /patients/{patientId}/programParticipants/{participantId}
+      match /programParticipants/{participantId} {
+        allow get: if isValidId(patientId) && isValidId(participantId) && isOwner(patientId) && (resource == null || existing().ownerId == request.auth.uid);
+        allow list: if isOwner(patientId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(patientId)
+          && isValidId(participantId)
+          && isOwner(patientId)
+          && isValidProgramParticipant(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasValidParentPatient(patientId);
+        allow update: if isValidId(patientId)
+          && isValidId(participantId)
+          && isOwner(patientId)
+          && isValidProgramParticipant(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().enrolledDate == existing().enrolledDate
+          && incoming().baselineHba1c == existing().baselineHba1c
+          && incoming().updatedAt == request.time
+          && hasValidParentPatient(patientId)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'currentHba1c', 'targetHba1c', 'medsFreeMonths', 'remissionStage',
+            'activityCode', 'lastCheckupDate', 'nextFollowupDate', 'notes', 'updatedAt'
+          ]);
+        allow delete: if isValidId(patientId)
+          && isValidId(participantId)
+          && isOwner(patientId)
+          && existing().ownerId == request.auth.uid
+          && hasValidParentPatient(patientId);
+      }
+    }
+  }
+}
