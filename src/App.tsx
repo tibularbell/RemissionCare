@@ -23,6 +23,7 @@ import {
   LayoutDashboard,
   LogOut,
   Plus,
+  Settings,
   ShieldCheck,
   Smartphone,
   Stethoscope,
@@ -31,11 +32,16 @@ import {
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from './firebase';
 import {
   clampStr,
+  DEFAULT_SYSTEM_SETTINGS,
   FIELD_LIMITS,
   makeSafeDocId,
   type ActivityCode,
   type Appointment,
   type AppointmentPurpose,
+  type CareDelegation,
+  type CarePermission,
+  type CareRole,
+  type DelegationStatus,
   type DeviceReading,
   type DeviceType,
   type DoctorRecommendation,
@@ -49,6 +55,7 @@ import {
   type RecommendationCategory,
   type RecommendationPriority,
   type RemissionStage,
+  type SystemSettings,
 } from './types';
 import { analyzeHbA1cTrend, evaluateHbA1cEligibility } from './utils/clinicalAnalytics';
 import { seedClinicalDemoProfile } from './utils/seedDemoData';
@@ -58,6 +65,7 @@ import { DevicesView } from './components/DevicesView';
 import { AppointmentsView } from './components/AppointmentsView';
 import { ParticipantsView } from './components/ParticipantsView';
 import { RecommendationsView } from './components/RecommendationsView';
+import { SystemSettingsView } from './components/SystemSettingsView';
 import {
   PatientRegistration,
   type RegistrationPayload,
@@ -67,12 +75,20 @@ import {
   AddDeviceModal,
   AddHba1cModal,
   AddRecommendationModal,
+  CareDelegationModal,
   EditProfileModal,
   EnrollParticipantModal,
   UpdateParticipantProgressModal,
 } from './components/Modals';
 
-type NavTab = 'overview' | 'hba1c' | 'devices' | 'appointments' | 'participants' | 'recommendations';
+type NavTab =
+  | 'overview'
+  | 'hba1c'
+  | 'devices'
+  | 'appointments'
+  | 'participants'
+  | 'recommendations'
+  | 'settings';
 
 const NAV_ITEMS: Array<{
   id: NavTab;
@@ -86,6 +102,7 @@ const NAV_ITEMS: Array<{
   { id: 'appointments', label: 'นัดหมาย', mobileLabel: 'นัดหมาย', icon: CalendarClock },
   { id: 'participants', label: 'กิจกรรม', mobileLabel: 'กิจกรรม', icon: Users },
   { id: 'recommendations', label: 'คำแนะนำ', mobileLabel: 'แพทย์', icon: Stethoscope },
+  { id: 'settings', label: 'ตั้งค่าระบบ', mobileLabel: 'ตั้งค่า', icon: Settings },
 ];
 
 export default function App() {
@@ -102,6 +119,9 @@ export default function App() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [recommendations, setRecommendations] = useState<DoctorRecommendation[]>([]);
   const [participants, setParticipants] = useState<ProgramParticipant[]>([]);
+  const [careDelegations, setCareDelegations] = useState<CareDelegation[]>([]);
+  const [systemSettings, setSystemSettings] = useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
+  const [hasAdminDoc, setHasAdminDoc] = useState(false);
 
   const [activeTab, setActiveTab] = useState<NavTab>('overview');
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
@@ -115,8 +135,10 @@ export default function App() {
     | 'profile'
     | 'registration'
     | 'enrollParticipant'
+    | 'delegation'
   >(null);
   const [editingParticipant, setEditingParticipant] = useState<ProgramParticipant | null>(null);
+  const [editingDelegation, setEditingDelegation] = useState<CareDelegation | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (nextUser) => {
@@ -131,6 +153,9 @@ export default function App() {
         setAppointments([]);
         setRecommendations([]);
         setParticipants([]);
+        setCareDelegations([]);
+        setSystemSettings(DEFAULT_SYSTEM_SETTINGS);
+        setHasAdminDoc(false);
       }
     });
     return () => unsub();
@@ -233,6 +258,48 @@ export default function App() {
           );
         },
         (err) => handleFirestoreError(err, OperationType.LIST, participantsPath)
+      )
+    );
+
+    const delegationsPath = `patients/${uid}/careDelegations`;
+    unsubs.push(
+      onSnapshot(
+        query(collection(db, delegationsPath), where('ownerId', '==', uid)),
+        (snap) => {
+          setCareDelegations(
+            snap.docs.map((d) => ({
+              id: d.id,
+              ...(d.data() as Omit<CareDelegation, 'id'>),
+            }))
+          );
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, delegationsPath)
+      )
+    );
+
+    const settingsPath = 'systemSettings/default';
+    unsubs.push(
+      onSnapshot(
+        doc(db, 'systemSettings', 'default'),
+        (snap) => {
+          if (snap.exists()) {
+            setSystemSettings(snap.data() as SystemSettings);
+          } else {
+            setSystemSettings(DEFAULT_SYSTEM_SETTINGS);
+          }
+        },
+        (err) => handleFirestoreError(err, OperationType.GET, settingsPath)
+      )
+    );
+
+    const adminPath = `admins/${uid}`;
+    unsubs.push(
+      onSnapshot(
+        doc(db, 'admins', uid),
+        (snap) => {
+          setHasAdminDoc(snap.exists());
+        },
+        (err) => handleFirestoreError(err, OperationType.GET, adminPath)
       )
     );
 
@@ -735,6 +802,131 @@ export default function App() {
     }
   };
 
+  const handleSaveSystemSettings = async (
+    next: Omit<SystemSettings, 'updatedBy' | 'updatedAt'>
+  ) => {
+    if (!user) return;
+    const path = 'systemSettings/default';
+    try {
+      await setDoc(doc(db, 'systemSettings', 'default'), {
+        organizationName: clampStr(next.organizationName, FIELD_LIMITS.clinicName),
+        hba1cRemissionTarget: next.hba1cRemissionTarget,
+        hba1cIntervalDays: next.hba1cIntervalDays,
+        maxTestsPerFiscalYear: next.maxTestsPerFiscalYear,
+        defaultReminderDaysBefore: next.defaultReminderDaysBefore,
+        specialPpActivityCode: next.specialPpActivityCode,
+        enforceNumericHba1cOnly: next.enforceNumericHba1cOnly,
+        blockZ131Screening: next.blockZ131Screening,
+        auto91DayFollowup: next.auto91DayFollowup,
+        updatedBy: clampStr(user.email || user.displayName || 'System Admin', FIELD_LIMITS.email),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  };
+
+  const handleSaveDelegation = async (
+    data: {
+      delegateName: string;
+      delegateEmail: string;
+      delegateUid: string;
+      role: CareRole;
+      department: string;
+      permissions: CarePermission[];
+      status: DelegationStatus;
+      assignedDate: string;
+      expiryDate: string;
+      notes: string;
+    },
+    existingId?: string
+  ) => {
+    if (!user) return;
+    const nowTs = serverTimestamp();
+    if (existingId) {
+      const path = `patients/${user.uid}/careDelegations/${existingId}`;
+      try {
+        await updateDoc(doc(db, 'patients', user.uid, 'careDelegations', existingId), {
+          delegateName: clampStr(data.delegateName, FIELD_LIMITS.displayName),
+          delegateEmail: clampStr(data.delegateEmail, FIELD_LIMITS.email),
+          delegateUid: clampStr(data.delegateUid, FIELD_LIMITS.id),
+          role: data.role,
+          department: clampStr(data.department, FIELD_LIMITS.department),
+          permissions: data.permissions,
+          status: data.status,
+          expiryDate: data.expiryDate,
+          notes: clampStr(data.notes, FIELD_LIMITS.notes),
+          updatedAt: nowTs,
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, path);
+      }
+      return;
+    }
+
+    const id = makeSafeDocId('del');
+    const path = `patients/${user.uid}/careDelegations/${id}`;
+    try {
+      await setDoc(doc(db, 'patients', user.uid, 'careDelegations', id), {
+        ownerId: user.uid,
+        delegateName: clampStr(data.delegateName, FIELD_LIMITS.displayName),
+        delegateEmail: clampStr(data.delegateEmail, FIELD_LIMITS.email),
+        delegateUid: clampStr(data.delegateUid, FIELD_LIMITS.id),
+        role: data.role,
+        department: clampStr(data.department, FIELD_LIMITS.department),
+        permissions: data.permissions,
+        status: data.status,
+        assignedDate: data.assignedDate,
+        expiryDate: data.expiryDate,
+        notes: clampStr(data.notes, FIELD_LIMITS.notes),
+        createdAt: nowTs,
+        updatedAt: nowTs,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, path);
+    }
+  };
+
+  const handleUpdateDelegationStatus = async (id: string, status: DelegationStatus) => {
+    if (!user) return;
+    const path = `patients/${user.uid}/careDelegations/${id}`;
+    try {
+      await updateDoc(doc(db, 'patients', user.uid, 'careDelegations', id), {
+        status,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleDeleteDelegation = async (id: string) => {
+    if (!user) return;
+    const path = `patients/${user.uid}/careDelegations/${id}`;
+    try {
+      await deleteDoc(doc(db, 'patients', user.uid, 'careDelegations', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, path);
+    }
+  };
+
+  const handleGrantCloudAdmin = async (targetUid: string, displayName: string) => {
+    if (!user) return;
+    const cleanUid = clampStr(targetUid, FIELD_LIMITS.id);
+    const path = `admins/${cleanUid}`;
+    try {
+      await setDoc(doc(db, 'admins', cleanUid), {
+        uid: cleanUid,
+        displayName: clampStr(displayName, FIELD_LIMITS.displayName),
+        role: 'admin',
+        grantedBy: clampStr(user.email || user.uid, FIELD_LIMITS.id),
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, path);
+    }
+  };
+
   // Loading Screen
   if (!authReady) {
     return (
@@ -903,8 +1095,8 @@ export default function App() {
           RemissionCare
         </button>
 
-        {/* Zone 2: 5 concise single-line nav links (Desktop) */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
+        {/* Zone 2: Concise single-line nav links (Desktop) */}
+        <nav className="hidden md:flex items-center gap-4 lg:gap-6 text-sm font-medium text-slate-600">
           {NAV_ITEMS.map((item) => {
             const isActive = activeTab === item.id;
             return (
@@ -1009,6 +1201,29 @@ export default function App() {
             onOpenRegistration={() => setModal('registration')}
           />
         )}
+
+        {activeTab === 'settings' && (
+          <SystemSettingsView
+            settings={systemSettings}
+            delegations={careDelegations}
+            isAdminUser={
+              Boolean(user.emailVerified && user.email === 'tibularbell@gmail.com') || hasAdminDoc
+            }
+            currentUserEmail={user.email || ''}
+            onSaveSettings={handleSaveSystemSettings}
+            onAddDelegation={() => {
+              setEditingDelegation(null);
+              setModal('delegation');
+            }}
+            onEditDelegation={(d) => {
+              setEditingDelegation(d);
+              setModal('delegation');
+            }}
+            onUpdateDelegationStatus={handleUpdateDelegationStatus}
+            onDeleteDelegation={handleDeleteDelegation}
+            onGrantCloudAdmin={handleGrantCloudAdmin}
+          />
+        )}
       </main>
 
       {/* Quiet Account & Privacy Footer */}
@@ -1018,7 +1233,7 @@ export default function App() {
           <span aria-hidden="true">·</span>
           <span>{user.email}</span>
           <span aria-hidden="true">·</span>
-          <span>ซิงค์ข้อมูลผ่านคลาวด์ Firebase</span>
+          <span>{systemSettings.organizationName}</span>
         </div>
         <button
           type="button"
@@ -1033,7 +1248,7 @@ export default function App() {
       {/* Mobile Bottom Navigation Bar (56px height + 48px header = 104px < 15% mobile cap) */}
       <nav
         aria-label="เมนูหลักมือถือ"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 h-14 bg-white/95 backdrop-blur-md border-t border-slate-200 grid grid-cols-6 items-center"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 h-14 bg-white/95 backdrop-blur-md border-t border-slate-200 grid grid-cols-7 items-center"
       >
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
@@ -1133,6 +1348,18 @@ export default function App() {
           participant={editingParticipant}
           onClose={() => setEditingParticipant(null)}
           onSubmit={handleUpdateParticipantProgress}
+        />
+      )}
+
+      {modal === 'delegation' && (
+        <CareDelegationModal
+          existingDelegation={editingDelegation}
+          defaultDepartment={profile.clinicName}
+          onClose={() => {
+            setModal(null);
+            setEditingDelegation(null);
+          }}
+          onSubmit={handleSaveDelegation}
         />
       )}
     </div>

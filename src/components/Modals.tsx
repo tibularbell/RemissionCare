@@ -3,6 +3,10 @@ import { AlertTriangle, X } from 'lucide-react';
 import type {
   ActivityCode,
   AppointmentPurpose,
+  CareDelegation,
+  CarePermission,
+  CareRole,
+  DelegationStatus,
   DeviceType,
   EClaimStatus,
   Icd10Code,
@@ -15,7 +19,7 @@ import type {
   RecommendationPriority,
   RemissionStage,
 } from '../types';
-import { FIELD_LIMITS, VALID_ICD10_CODES } from '../types';
+import { FIELD_LIMITS, ID_PATTERN, VALID_ICD10_CODES } from '../types';
 
 interface ModalWrapperProps {
   title: string;
@@ -1553,3 +1557,303 @@ export const UpdateParticipantProgressModal: React.FC<{
     </ModalWrapper>
   );
 };
+
+const ROLE_DEFAULT_PERMS: Record<CareRole, CarePermission[]> = {
+  system_admin: [
+    'manage_settings',
+    'manage_patients',
+    'edit_hba1c',
+    'manage_appointments',
+    'export_reports',
+    'audit_43files',
+  ],
+  physician: ['manage_patients', 'edit_hba1c', 'manage_appointments', 'export_reports'],
+  care_coordinator: ['manage_patients', 'manage_appointments', 'export_reports'],
+  nurse_auditor: ['audit_43files', 'export_reports', 'manage_appointments'],
+};
+
+const PERM_OPTIONS: Array<{ id: CarePermission; label: string }> = [
+  { id: 'manage_settings', label: 'แก้ไขตั้งค่าระบบ' },
+  { id: 'manage_patients', label: 'จัดการทะเบียนผู้ป่วย' },
+  { id: 'edit_hba1c', label: 'บันทึก/ตรวจผล HbA1c' },
+  { id: 'manage_appointments', label: 'จัดการนัดหมายแพทย์' },
+  { id: 'export_reports', label: 'ส่งออกรายงาน PDF/CSV' },
+  { id: 'audit_43files', label: 'ตรวจสอบ 43 แฟ้ม / REP' },
+];
+
+export const CareDelegationModal: React.FC<{
+  existingDelegation?: CareDelegation | null;
+  defaultDepartment: string;
+  onClose: () => void;
+  onSubmit: (
+    data: {
+      delegateName: string;
+      delegateEmail: string;
+      delegateUid: string;
+      role: CareRole;
+      department: string;
+      permissions: CarePermission[];
+      status: DelegationStatus;
+      assignedDate: string;
+      expiryDate: string;
+      notes: string;
+    },
+    existingId?: string
+  ) => Promise<void>;
+}> = ({ existingDelegation, defaultDepartment, onClose, onSubmit }) => {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const nextYearIso = addDaysIso(todayIso, 365);
+
+  const [delegateName, setDelegateName] = useState(existingDelegation?.delegateName || '');
+  const [delegateEmail, setDelegateEmail] = useState(existingDelegation?.delegateEmail || '');
+  const [delegateUid, setDelegateUid] = useState(existingDelegation?.delegateUid || '');
+  const [role, setRole] = useState<CareRole>(existingDelegation?.role || 'care_coordinator');
+  const [department, setDepartment] = useState(
+    existingDelegation?.department || defaultDepartment || 'คลินิกเบาหวานระยะสงบ'
+  );
+  const [permissions, setPermissions] = useState<CarePermission[]>(
+    existingDelegation?.permissions || ROLE_DEFAULT_PERMS.care_coordinator
+  );
+  const [status, setStatus] = useState<DelegationStatus>(existingDelegation?.status || 'active');
+  const [assignedDate, setAssignedDate] = useState(
+    existingDelegation?.assignedDate || todayIso
+  );
+  const [expiryDate, setExpiryDate] = useState(existingDelegation?.expiryDate || nextYearIso);
+  const [notes, setNotes] = useState(existingDelegation?.notes || '');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const togglePermission = (perm: CarePermission) => {
+    setPermissions((prev) =>
+      prev.includes(perm) ? prev.filter((p) => p !== perm) : [...prev, perm]
+    );
+  };
+
+  const handleRoleChange = (nextRole: CareRole) => {
+    setRole(nextRole);
+    if (!existingDelegation) {
+      setPermissions(ROLE_DEFAULT_PERMS[nextRole]);
+    }
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+
+    if (!delegateName.trim()) {
+      setErrorMsg('กรุณาระบุชื่อ-สกุลผู้รับมอบหมาย');
+      return;
+    }
+    if (!department.trim()) {
+      setErrorMsg('กรุณาระบุหน่วยงาน / แผนก');
+      return;
+    }
+    if (permissions.length === 0) {
+      setErrorMsg('กรุณาเลือกขอบเขตสิทธิ์อย่างน้อย 1 รายการ');
+      return;
+    }
+    const cleanUid = delegateUid.trim();
+    if (cleanUid && !ID_PATTERN.test(cleanUid)) {
+      setErrorMsg('Firebase UID ต้องประกอบด้วยตัวอักษรภาษาอังกฤษ ตัวเลข _ หรือ - เท่านั้น');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await onSubmit(
+        {
+          delegateName: delegateName.trim(),
+          delegateEmail: delegateEmail.trim(),
+          delegateUid: cleanUid,
+          role,
+          department: department.trim(),
+          permissions,
+          status,
+          assignedDate,
+          expiryDate,
+          notes: notes.trim(),
+        },
+        existingDelegation?.id
+      );
+      onClose();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'ไม่สามารถบันทึกการมอบหมายได้');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalWrapper
+      title={existingDelegation ? 'แก้ไขสิทธิ์ผู้ดูแลระบบ / ทีมคลินิก' : 'มอบหมายการดูแลระบบและทีมคลินิก'}
+      onClose={onClose}
+    >
+      <form onSubmit={handleSave} className="space-y-4">
+        {errorMsg && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800">
+            {errorMsg}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">ชื่อ-สกุลผู้รับมอบหมาย</label>
+            <input
+              type="text"
+              required
+              maxLength={FIELD_LIMITS.displayName}
+              value={delegateName}
+              onChange={(e) => setDelegateName(e.target.value)}
+              placeholder="เช่น พญ. วิภาดา ใจสว่าง"
+              className="w-full min-h-[44px] px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-teal-600"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">บทบาทหน้าที่</label>
+            <select
+              value={role}
+              onChange={(e) => handleRoleChange(e.target.value as CareRole)}
+              className="w-full min-h-[44px] px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-teal-600"
+            >
+              <option value="system_admin">ผู้ดูแลระบบ (System Admin)</option>
+              <option value="physician">แพทย์ผู้ดูแล (Physician)</option>
+              <option value="care_coordinator">ผู้ประสานงานคลินิก (Coordinator)</option>
+              <option value="nurse_auditor">พยาบาลตรวจ 43 แฟ้ม (Auditor)</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">อีเมลติดต่อ / บัญชี Google</label>
+            <input
+              type="email"
+              maxLength={FIELD_LIMITS.email}
+              value={delegateEmail}
+              onChange={(e) => setDelegateEmail(e.target.value)}
+              placeholder="name@hospital.go.th"
+              className="w-full min-h-[44px] px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:border-teal-600"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">หน่วยงาน / แผนก</label>
+            <input
+              type="text"
+              required
+              maxLength={FIELD_LIMITS.department}
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+              className="w-full min-h-[44px] px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-teal-600"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">สถานะสิทธิ์</label>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value as DelegationStatus)}
+              className="w-full min-h-[44px] px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-teal-600"
+            >
+              <option value="active">ปฏิบัติหน้าที่ (Active)</option>
+              <option value="paused">พักสิทธิ์ชั่วคราว</option>
+              <option value="revoked">เพิกถอนสิทธิ์</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">วันที่เริ่มมอบหมาย</label>
+            <input
+              type="date"
+              required
+              disabled={Boolean(existingDelegation)}
+              value={assignedDate}
+              onChange={(e) => setAssignedDate(e.target.value)}
+              className="w-full min-h-[44px] px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:border-teal-600 disabled:bg-slate-50"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">วันหมดอายุสิทธิ์</label>
+            <input
+              type="date"
+              required
+              value={expiryDate}
+              onChange={(e) => setExpiryDate(e.target.value)}
+              className="w-full min-h-[44px] px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:border-teal-600"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-slate-700 mb-1.5">
+            ขอบเขตสิทธิ์การดูแล (เลือกได้มากกว่า 1 รายการ)
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+            {PERM_OPTIONS.map((opt) => (
+              <label
+                key={opt.id}
+                className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={permissions.includes(opt.id)}
+                  onChange={() => togglePermission(opt.id)}
+                  className="w-4 h-4 accent-teal-600 rounded"
+                />
+                <span>{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-slate-700 mb-1">
+            Firebase UID (ไม่บังคับ — ใช้เมื่อต้องการเพิ่มสิทธิ์ Cloud Admin)
+          </label>
+          <input
+            type="text"
+            maxLength={FIELD_LIMITS.id}
+            value={delegateUid}
+            onChange={(e) => setDelegateUid(e.target.value)}
+            placeholder="เช่น 3LFpYFsNn6WnEKRvEbubsi40FCH3"
+            className="w-full min-h-[44px] px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:border-teal-600"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-slate-700 mb-1">หมายเหตุการมอบหมาย</label>
+          <textarea
+            rows={2}
+            maxLength={FIELD_LIMITS.notes}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="ระบุขอบเขตความรับผิดชอบหรือเวรปฏิบัติงาน..."
+            className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-teal-600"
+          />
+        </div>
+
+        <div className="flex justify-end gap-2.5 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="min-h-[44px] px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-xl"
+          >
+            ยกเลิก
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="min-h-[44px] px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-xl disabled:opacity-60"
+          >
+            {saving
+              ? 'กำลังบันทึก...'
+              : existingDelegation
+                ? 'บันทึกการแก้ไขสิทธิ์'
+                : 'ยืนยันการมอบหมาย'}
+          </button>
+        </div>
+      </form>
+    </ModalWrapper>
+  );
+};
+

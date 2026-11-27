@@ -28,6 +28,13 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == patientId;
     }
 
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'tibularbell@gmail.com'
+        || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
     function isValidIcd10(code) {
       return code is string && code in ['E10', 'E11', 'E12', 'E13', 'E14'];
     }
@@ -211,6 +218,78 @@ service cloud.firestore {
         && isValidDateStr(data.lastCheckupDate)
         && isValidDateStr(data.nextFollowupDate)
         && data.clinicName is string && data.clinicName.size() <= 160
+        && data.notes is string && data.notes.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: AdminUser
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'grantedBy', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'role', 'grantedBy', 'createdAt'])
+        && data.uid is string && isValidId(data.uid)
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.role is string && data.role == 'admin'
+        && data.grantedBy is string && data.grantedBy.size() >= 1 && data.grantedBy.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: SystemSettings
+    function isValidSystemSettings(data) {
+      return data.keys().hasAll([
+          'organizationName', 'hba1cRemissionTarget', 'hba1cIntervalDays',
+          'maxTestsPerFiscalYear', 'defaultReminderDaysBefore', 'specialPpActivityCode',
+          'enforceNumericHba1cOnly', 'blockZ131Screening', 'auto91DayFollowup',
+          'updatedBy', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'organizationName', 'hba1cRemissionTarget', 'hba1cIntervalDays',
+          'maxTestsPerFiscalYear', 'defaultReminderDaysBefore', 'specialPpActivityCode',
+          'enforceNumericHba1cOnly', 'blockZ131Screening', 'auto91DayFollowup',
+          'updatedBy', 'updatedAt'
+        ])
+        && data.organizationName is string && data.organizationName.size() >= 1 && data.organizationName.size() <= 160
+        && data.hba1cRemissionTarget is number && data.hba1cRemissionTarget >= 4.5 && data.hba1cRemissionTarget <= 8.0
+        && data.hba1cIntervalDays is number && data.hba1cIntervalDays >= 30 && data.hba1cIntervalDays <= 180
+        && data.maxTestsPerFiscalYear is number && data.maxTestsPerFiscalYear >= 1 && data.maxTestsPerFiscalYear <= 6
+        && data.defaultReminderDaysBefore is number && data.defaultReminderDaysBefore >= 1 && data.defaultReminderDaysBefore <= 30
+        && data.specialPpActivityCode is string && data.specialPpActivityCode in ['120', 'standard']
+        && data.enforceNumericHba1cOnly is bool
+        && data.blockZ131Screening is bool
+        && data.auto91DayFollowup is bool
+        && data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 160
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: CareDelegation
+    function isValidCareDelegation(data) {
+      return data.keys().hasAll([
+          'ownerId', 'delegateName', 'delegateEmail', 'delegateUid', 'role',
+          'department', 'permissions', 'status', 'assignedDate', 'expiryDate',
+          'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'delegateName', 'delegateEmail', 'delegateUid', 'role',
+          'department', 'permissions', 'status', 'assignedDate', 'expiryDate',
+          'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.delegateName is string && data.delegateName.size() >= 1 && data.delegateName.size() <= 120
+        && data.delegateEmail is string && data.delegateEmail.size() <= 160
+        && data.delegateUid is string && data.delegateUid.size() <= 128
+        && data.role is string && data.role in ['system_admin', 'physician', 'care_coordinator', 'nurse_auditor']
+        && data.department is string && data.department.size() >= 1 && data.department.size() <= 120
+        && data.permissions is list
+        && data.permissions.size() >= 1
+        && data.permissions.size() <= 6
+        && data.permissions[0] is string
+        && data.permissions.hasOnly([
+          'manage_settings', 'manage_patients', 'edit_hba1c',
+          'manage_appointments', 'export_reports', 'audit_43files'
+        ])
+        && data.status is string && data.status in ['active', 'paused', 'revoked']
+        && isValidDateStr(data.assignedDate)
+        && isValidDateStr(data.expiryDate)
         && data.notes is string && data.notes.size() <= 500
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -408,6 +487,77 @@ service cloud.firestore {
           && existing().ownerId == request.auth.uid
           && hasValidParentPatient(patientId);
       }
+
+      // Subcollection: /patients/{patientId}/careDelegations/{delegationId}
+      match /careDelegations/{delegationId} {
+        allow get: if isValidId(patientId) && isValidId(delegationId) && (isOwner(patientId) || isAdmin()) && (resource == null || existing().ownerId == patientId);
+        allow list: if isOwner(patientId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(patientId)
+          && isValidId(delegationId)
+          && isOwner(patientId)
+          && isValidCareDelegation(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasValidParentPatient(patientId);
+        allow update: if isValidId(patientId)
+          && isValidId(delegationId)
+          && (isOwner(patientId) || isAdmin())
+          && isValidCareDelegation(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && hasValidParentPatient(patientId)
+          && (
+            isAdmin()
+            || incoming().diff(existing()).affectedKeys().hasOnly([
+              'delegateName', 'delegateEmail', 'delegateUid', 'role', 'department',
+              'permissions', 'status', 'expiryDate', 'notes', 'updatedAt'
+            ])
+          );
+        allow delete: if isValidId(patientId)
+          && isValidId(delegationId)
+          && (isOwner(patientId) || isAdmin())
+          && existing().ownerId == patientId
+          && hasValidParentPatient(patientId);
+      }
+    }
+
+    // Collection: /systemSettings/{settingId}
+    match /systemSettings/{settingId} {
+      allow get: if isValidId(settingId) && settingId == 'default' && isSignedIn();
+      allow list: if false;
+      allow create: if isValidId(settingId)
+        && settingId == 'default'
+        && isAdmin()
+        && isValidSystemSettings(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(settingId)
+        && settingId == 'default'
+        && isAdmin()
+        && isValidSystemSettings(incoming())
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'organizationName', 'hba1cRemissionTarget', 'hba1cIntervalDays',
+          'maxTestsPerFiscalYear', 'defaultReminderDaysBefore', 'specialPpActivityCode',
+          'enforceNumericHba1cOnly', 'blockZ131Screening', 'auto91DayFollowup',
+          'updatedBy', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // Collection: /admins/{adminUid}
+    match /admins/{adminUid} {
+      allow get: if isValidId(adminUid) && (isOwner(adminUid) || isAdmin());
+      allow list: if false;
+      allow create: if isValidId(adminUid)
+        && isAdmin()
+        && isValidAdminUser(incoming())
+        && incoming().uid == adminUid
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(adminUid)
+        && isAdmin()
+        && adminUid != request.auth.uid;
     }
   }
 }

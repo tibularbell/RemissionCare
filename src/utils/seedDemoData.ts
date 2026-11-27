@@ -312,6 +312,43 @@ export async function seedClinicalDemoProfile(
     });
   }
 
+  const delegationSeeds = [
+    {
+      delegateName: 'นพ. ธนกร วรโชติ',
+      delegateEmail: 'thanakorn.md@saraburi-hosp.go.th',
+      delegateUid: '',
+      role: 'physician',
+      department: 'คลินิกเบาหวานระยะสงบ (DM Remission)',
+      permissions: ['manage_patients', 'edit_hba1c', 'manage_appointments', 'export_reports'],
+      status: 'active',
+      assignedDate: isoDaysOffset(-60),
+      expiryDate: isoDaysOffset(305),
+      notes: 'แพทย์ผู้รับผิดชอบหลักในการประเมินเกณฑ์หยุดยาและรหัสกิจกรรม 120',
+    },
+    {
+      delegateName: 'พว. กมลชนก ศรีสุวรรณ',
+      delegateEmail: 'kamonchanok.audit@saraburi-hosp.go.th',
+      delegateUid: '',
+      role: 'nurse_auditor',
+      department: 'งานเวชระเบียนและส่งข้อมูล 43 แฟ้ม',
+      permissions: ['audit_43files', 'export_reports', 'manage_appointments'],
+      status: 'active',
+      assignedDate: isoDaysOffset(-30),
+      expiryDate: isoDaysOffset(335),
+      notes: 'ผู้ตรวจสอบความถูกต้อง LOINC 4548-4 และป้องกัน REP Error ก่อนส่ง e-Claim',
+    },
+  ];
+
+  for (const d of delegationSeeds) {
+    const id = makeSafeDocId('del');
+    batch.set(doc(db, 'patients', uid, 'careDelegations', id), {
+      ownerId: uid,
+      ...d,
+      createdAt: nowTs,
+      updatedAt: nowTs,
+    });
+  }
+
   try {
     await batch.commit();
   } catch (error) {

@@ -3,6 +3,7 @@ import {
   ArrowDownRight,
   ArrowRight,
   ArrowUpRight,
+  BarChart3,
   BellRing,
   CalendarClock,
   CheckCircle2,
@@ -35,6 +36,7 @@ import {
 import { CombinedHealthChart } from './CombinedHealthChart';
 import { GlucoseTrendChart } from './GlucoseTrendChart';
 import { Hba1cChart } from './Hba1cChart';
+import { RemissionProgressModal } from './RemissionProgressModal';
 
 interface OverviewViewProps {
   profile: PatientProfile;
@@ -47,7 +49,14 @@ interface OverviewViewProps {
   onSyncDevice: () => void;
   onEnrollParticipant: () => void;
   onNavigate: (
-    tab: 'overview' | 'hba1c' | 'devices' | 'appointments' | 'participants' | 'recommendations'
+    tab:
+      | 'overview'
+      | 'hba1c'
+      | 'devices'
+      | 'appointments'
+      | 'participants'
+      | 'recommendations'
+      | 'settings'
   ) => void;
   onAcknowledgeRec: (recId: string) => Promise<void>;
 }
@@ -65,6 +74,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   onNavigate,
   onAcknowledgeRec,
 }) => {
+  const [showRemissionModal, setShowRemissionModal] = React.useState(false);
   const trend = analyzeHbA1cTrend(records, profile.medsFreeMonths);
   const eligibility = evaluateHbA1cEligibility(records);
   const deviceSummary = summarizeDeviceMetrics(readings);
@@ -152,11 +162,21 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </div>
 
             <div className="space-y-1.5">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <CheckCircle2
-                  className={`w-4 h-4 shrink-0 ${latestIsGood ? 'text-teal-600' : 'text-amber-600'}`}
-                />
-                <span>{stageLabel}</span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <CheckCircle2
+                    className={`w-4 h-4 shrink-0 ${latestIsGood ? 'text-teal-600' : 'text-amber-600'}`}
+                  />
+                  <span>{stageLabel}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowRemissionModal(true)}
+                  className="min-h-[36px] inline-flex items-center gap-1.5 px-3 py-1 bg-teal-50 hover:bg-teal-100 text-teal-800 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0"
+                >
+                  <BarChart3 className="w-3.5 h-3.5" />
+                  <span>ดูความคืบหน้า Remission &amp; ปลอดยา</span>
+                </button>
               </div>
               <p className="text-sm text-slate-600 leading-relaxed max-w-2xl">
                 {trend.clinicalSummaryTh}
@@ -482,6 +502,14 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           </button>
         </div>
       </section>
+      {showRemissionModal && (
+        <RemissionProgressModal
+          profile={profile}
+          records={records}
+          onClose={() => setShowRemissionModal(false)}
+          onAddHba1c={onAddHba1c}
+        />
+      )}
     </div>
   );
 };

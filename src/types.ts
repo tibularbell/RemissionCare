@@ -11,6 +11,15 @@ export type AppointmentPurpose = 'hba1c_followup' | 'remission_eval' | 'nutritio
 export type AppointmentStatus = 'scheduled' | 'completed' | 'cancelled';
 export type RecommendationCategory = 'nutrition' | 'exercise' | 'medication' | 'lab_schedule' | 'remission_plan';
 export type RecommendationPriority = 'routine' | 'attention' | 'urgent';
+export type CareRole = 'system_admin' | 'physician' | 'care_coordinator' | 'nurse_auditor';
+export type CarePermission =
+  | 'manage_settings'
+  | 'manage_patients'
+  | 'edit_hba1c'
+  | 'manage_appointments'
+  | 'export_reports'
+  | 'audit_43files';
+export type DelegationStatus = 'active' | 'paused' | 'revoked';
 
 export const VALID_ICD10_CODES: Icd10Code[] = ['E10', 'E11', 'E12', 'E13', 'E14'];
 export const ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
@@ -137,6 +146,50 @@ export interface ProgramParticipant {
   lastCheckupDate: string;
   nextFollowupDate: string;
   clinicName: string;
+  notes: string;
+  createdAt?: Timestamp | unknown;
+  updatedAt?: Timestamp | unknown;
+}
+
+export interface SystemSettings {
+  organizationName: string;
+  hba1cRemissionTarget: number;
+  hba1cIntervalDays: number;
+  maxTestsPerFiscalYear: number;
+  defaultReminderDaysBefore: number;
+  specialPpActivityCode: ActivityCode;
+  enforceNumericHba1cOnly: boolean;
+  blockZ131Screening: boolean;
+  auto91DayFollowup: boolean;
+  updatedBy: string;
+  updatedAt?: Timestamp | unknown;
+}
+
+export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
+  organizationName: 'คลินิกโรคเบาหวานระยะสงบ · RemissionCare',
+  hba1cRemissionTarget: 6.5,
+  hba1cIntervalDays: 90,
+  maxTestsPerFiscalYear: 2,
+  defaultReminderDaysBefore: 7,
+  specialPpActivityCode: '120',
+  enforceNumericHba1cOnly: true,
+  blockZ131Screening: true,
+  auto91DayFollowup: true,
+  updatedBy: 'ระบบมาตรฐาน 43 แฟ้ม',
+};
+
+export interface CareDelegation {
+  id: string;
+  ownerId: string;
+  delegateName: string;
+  delegateEmail: string;
+  delegateUid: string;
+  role: CareRole;
+  department: string;
+  permissions: CarePermission[];
+  status: DelegationStatus;
+  assignedDate: string;
+  expiryDate: string;
   notes: string;
   createdAt?: Timestamp | unknown;
   updatedAt?: Timestamp | unknown;

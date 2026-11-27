@@ -503,6 +503,180 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Trusted system administrator grant document keyed by verified Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin"],
+          "maxLength": 20
+        },
+        "grantedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "role", "grantedBy", "createdAt"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "Clinical and operational system configuration for RemissionCare.",
+      "type": "object",
+      "properties": {
+        "organizationName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "hba1cRemissionTarget": {
+          "type": "number"
+        },
+        "hba1cIntervalDays": {
+          "type": "number"
+        },
+        "maxTestsPerFiscalYear": {
+          "type": "number"
+        },
+        "defaultReminderDaysBefore": {
+          "type": "number"
+        },
+        "specialPpActivityCode": {
+          "type": "string",
+          "enum": ["120", "standard"],
+          "maxLength": 20
+        },
+        "enforceNumericHba1cOnly": {
+          "type": "boolean"
+        },
+        "blockZ131Screening": {
+          "type": "boolean"
+        },
+        "auto91DayFollowup": {
+          "type": "boolean"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "organizationName",
+        "hba1cRemissionTarget",
+        "hba1cIntervalDays",
+        "maxTestsPerFiscalYear",
+        "defaultReminderDaysBefore",
+        "specialPpActivityCode",
+        "enforceNumericHba1cOnly",
+        "blockZ131Screening",
+        "auto91DayFollowup",
+        "updatedBy",
+        "updatedAt"
+      ]
+    },
+    "CareDelegation": {
+      "title": "CareDelegation",
+      "description": "Delegated clinical care and system administration assignment scoped to a patient workspace.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "delegateName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "delegateEmail": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "delegateUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "enum": ["system_admin", "physician", "care_coordinator", "nurse_auditor"],
+          "maxLength": 32
+        },
+        "department": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "permissions": {
+          "type": "array"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "paused", "revoked"],
+          "maxLength": 20
+        },
+        "assignedDate": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "maxLength": 10
+        },
+        "expiryDate": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "maxLength": 10
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "delegateName",
+        "delegateEmail",
+        "delegateUid",
+        "role",
+        "department",
+        "permissions",
+        "status",
+        "assignedDate",
+        "expiryDate",
+        "notes",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -533,6 +707,18 @@
     "/patients/{patientId}/programParticipants/{participantId}": {
       "schema": { "$ref": "#/entities/ProgramParticipant" },
       "description": "Patients enrolled in RemissionCare cohort tracking and Special PP 120 progress."
+    },
+    "/patients/{patientId}/careDelegations/{delegationId}": {
+      "schema": { "$ref": "#/entities/CareDelegation" },
+      "description": "Delegated clinical care and system administration assignments."
+    },
+    "/systemSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/SystemSettings" },
+      "description": "System-wide clinical parameters and audit rules (settingId: default)."
+    },
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Trusted system administrator access control grants."
     }
   }
 }
