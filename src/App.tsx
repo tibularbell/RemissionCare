@@ -247,9 +247,17 @@ export default function App() {
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
-      setAuthError(
-        err instanceof Error ? err.message : 'ไม่สามารถเข้าสู่ระบบด้วย Google ได้ กรุณาลองอีกครั้ง'
-      );
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('auth/unauthorized-domain')) {
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        setAuthError(
+          `โดเมน "${host}" ยังไม่ได้รับอนุญาตใน Firebase Authentication (auth/unauthorized-domain) กรุณาไปที่ Firebase Console > Authentication > Settings > Authorized domains แล้วเพิ่มโดเมนนี้ลงในรายการ`
+        );
+      } else if (msg.includes('auth/popup-blocked')) {
+        setAuthError('เบราว์เซอร์บล็อกหน้าต่างป๊อปอัป กรุณาอนุญาต Pop-up สำหรับเว็บไซต์นี้แล้วลองใหม่อีกครั้ง');
+      } else {
+        setAuthError(msg || 'ไม่สามารถเข้าสู่ระบบด้วย Google ได้ กรุณาลองอีกครั้ง');
+      }
     } finally {
       setSigningIn(false);
     }
